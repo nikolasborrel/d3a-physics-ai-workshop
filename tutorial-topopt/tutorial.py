@@ -39,6 +39,49 @@ def _():
 
 @app.cell(hide_code=True)
 def _(mo):
+    import tempfile
+    import urllib.request
+    from pathlib import Path
+
+    REPO_URL = "https://raw.githubusercontent.com/nikolasborrel/d3a-physics-ai-workshop/main/tutorial-topopt"
+    SUPPORT_FILES = [
+        "bracket.py",
+        "neural_operator.py",
+        "train_surrogate.py",
+        "solver/tesseract_api.py",
+        "surrogate/tesseract_api.py",
+        "mosaic_shared/__init__.py",
+        "mosaic_shared/schema_types.py",
+        "mosaic_shared/problems/__init__.py",
+        "mosaic_shared/problems/structural_mesh/__init__.py",
+        "mosaic_shared/problems/structural_mesh/schemas.py",
+        "assets/visual_abstract.png",
+        "assets/mosaic_overview.png",
+        "assets/fno_architecture.png",
+    ]
+
+    # Hosted notebooks such as molab get only this file, so the rest comes from GitHub.
+    HERE = mo.notebook_dir()
+    if HERE is None or not all((HERE / name).exists() for name in SUPPORT_FILES):
+        HERE = Path(tempfile.gettempdir()) / "d3a-topopt"
+
+    def fetch(name):
+        """Path to a file of this tutorial, downloaded from GitHub if it isn't there yet."""
+        path = HERE / name
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            partial = path.with_name(path.name + ".part")
+            urllib.request.urlretrieve(f"{REPO_URL}/{name}", partial)
+            partial.rename(path)
+        return path
+
+    for _name in SUPPORT_FILES:
+        fetch(_name)
+    return HERE, fetch
+
+
+@app.cell(hide_code=True)
+def _(HERE, mo):
     mo.vstack([
         mo.md(r"""
         # Designing a bracket with a differentiable solver
@@ -46,7 +89,7 @@ def _(mo):
         A bracket is bolted to a wall and carries a load. We may fill **30% of the box** with
         material. Where should it go so the bracket is as stiff as possible?
         """),
-        mo.image(str(mo.notebook_dir() / "assets" / "visual_abstract.png"), width="100%"),
+        mo.image(str(HERE / "assets" / "visual_abstract.png"), width="100%"),
         mo.md(
             "*Photo: balcony bracket, William Ravenel House, Charleston. Jack Boucher, "
             "[Historic American Buildings Survey](https://www.loc.gov/pictures/item/sc0882.photos.364591p) "
@@ -64,12 +107,11 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(mo):
+def _(HERE):
     import inspect
     import os
     import sys
     import time
-    import urllib.request
     import warnings
 
     os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")  # silence a log line from a torch-fem dependency
@@ -81,7 +123,6 @@ def _(mo):
     import numpy as np
     import optax
 
-    HERE = mo.notebook_dir()
     sys.path.insert(0, str(HERE))  # for the helper modules and the vendored Mosaic package
 
     from tesseract_core import Tesseract
@@ -103,7 +144,6 @@ def _(mo):
 
     return (
         DensityFilter,
-        HERE,
         Tesseract,
         apply_tesseract,
         displacement_scale,
@@ -124,7 +164,6 @@ def _(mo):
         plot_gradient_comparison,
         plot_history,
         time,
-        urllib,
     )
 
 
@@ -261,7 +300,7 @@ def _(bracket, dc, load, mo, n_cells, np, plot_cell_field, t_grad, t_solve):
             log_relative=True,
         ),
         mo.md(
-            f"**{t_grad:.1f} s** for all {n_cells:,} cells. Finite differences: "
+            f"**{t_grad:.1f} s** for all {n_cells:,} cells. Finite differences would take "
             f"about **{(n_cells + 1) * t_solve / 60:.0f} minutes**."
         ),
     ])
@@ -296,7 +335,7 @@ def _(mo):
         mo.md(r"""
         ## 3. Optimize
 
-        Each iteration solves, computes the stiffness gain, and moves material towards the cells
+        Each iteration solves, computes the stiffness gain, and moves material toward the cells
         that gain most while keeping the total at 30%. The `optimize` function below is the
         entire optimizer.
         """),
@@ -315,7 +354,7 @@ def _(mo):
 @app.cell
 def _(VOLFRAC, apply_tesseract, filt, jax, n_cells, np, oc_update):
     def design_objective(model, load_inputs):
-        """Compliance and its gradient. ``model`` is anything with the solver's interface."""
+        """Jitted function of the design returning compliance and its gradient. ``model`` is anything with the solver's interface."""
 
         def objective(x):
             return apply_tesseract(model, {**load_inputs, "rho": filt(x)})["compliance"]
@@ -327,7 +366,7 @@ def _(VOLFRAC, apply_tesseract, filt, jax, n_cells, np, oc_update):
         x = np.full(n_cells, VOLFRAC, np.float32)
         for k in range(iterations):
             c, g = value_and_grad(x)  # one solve plus gradient
-            x = oc_update(x, g, filt, VOLFRAC)  # move material towards high stiffness gain
+            x = oc_update(x, g, filt, VOLFRAC)  # move material toward high stiffness gain
             if on_step:
                 on_step(k, float(c), x)
         return x
@@ -374,35 +413,51 @@ def _(
     optimize(solver, inputs, iterations.value, on_step=_show)
     mo.output.append(mo.md(
         f"Same amount of material, **{c_uniform / _history[-1]:.1f}× stiffer** than spreading it "
-        f"evenly. {time.perf_counter() - _t0:.0f} s."
+        f"evenly, after {time.perf_counter() - _t0:.0f} s of optimization."
     ))
     return
 
 
 @app.cell(hide_code=True)
-def _(mo):
+def _(HERE, mo):
     mo.vstack([
         mo.md(r"""
         ## 4. A neural surrogate
 
         Every iteration costs a solve. That's under a second here, but can be hours on a
         production mesh. A **surrogate** predicts what the solver computes, the whole
-        displacement field, from the same inputs. Ours is a Fourier neural operator (FNO):
+        displacement field, from the same inputs. Ours is a Fourier neural operator (FNO). It
+        works on the grid of mesh nodes, and every stage of the network is a field on that grid:
         """),
-        mo.mermaid("""
-        %%{init: {"theme": "neutral"}}%%
-        flowchart LR
-            IN["<b>Input fields</b><br/>stiffness · load · position<br/>on 25×7×13 grid points"]
-            LIFT["Lift<br/>8 → 24 channels"]
-            subgraph FL ["Fourier layer, repeated 4×"]
-                direction LR
-                FFT["FFT"] --> MODES["keep lowest<br/>8×4×6 modes,<br/>× learned weights"] --> IFFT["inverse<br/>FFT"] --> ADD(("+"))
-                LIN["pointwise linear"] --> ADD
-            end
-            PROJ["Project<br/>24 → 3 channels"]
-            OUT["<b>Displacement field</b><br/>3 components<br/>per grid point"]
-            IN --> LIFT --> FL --> PROJ --> OUT
-        """),
+        mo.image(str(HERE / "assets" / "fno_architecture.png"), width="100%"),
+        mo.md(
+            "*Each panel is a slice through the middle of the bracket, taken from the trained "
+            "surrogate we load below, on a design and load it never saw in training. The hidden "
+            "fields start out shaped like the design and end up shaped like the displacement.*"
+        ),
+        mo.accordion({
+            "Doesn't the FFT assume a periodic domain?": mo.md(r"""
+            It does, but the FNO doesn't inherit that restriction.
+
+            - **Padding.** The hidden fields live on a grid of 32 × 8 × 16 points instead of
+              25 × 7 × 13. Whatever wraps around from one end of the bracket lands in the padding
+              first, and the network is free to fill that strip with whatever helps. You can see
+              it doing so outside the dashed boxes.
+            - **A local path.** Every layer adds a pointwise linear term that knows nothing about
+              periodicity. The [original FNO paper](https://arxiv.org/abs/2010.08895) credits this
+              term with handling non-periodic boundaries.
+            - **Boundary conditions as inputs.** Nothing forces the wall to stay fixed. The network
+              sees a channel that marks the clamped nodes and learns from the data that they don't
+              move. It learns this only approximately: on held-out cases, the clamped nodes move by
+              about 0.4% of the largest displacement, where the solver gives exactly zero.
+
+            The problem also suits an FNO. The bracket is a box on a regular grid, which the FFT
+            needs, and displacement fields are smooth, so a few Fourier modes describe them well.
+            Irregular geometry needs extra machinery, such as
+            [learned deformations onto a regular grid](https://arxiv.org/abs/2207.05209), or a
+            different architecture.
+            """)
+        }),
     ])
     return
 
@@ -414,9 +469,9 @@ def _(mo):
 
     Each sample pairs a design and a load with the displacement field the solver computes for
     them. The designs come from recording every step of solver optimizations for 160 random
-    loads, from evenly spread material to finished brackets. Those are the designs the surrogate will meet
-    inside an optimizer. That's 4,000 solves, about 25 minutes on a laptop. Here's a set we
-    prepared earlier.
+    loads, from evenly spread material to finished brackets, because those are the designs the
+    surrogate will meet inside an optimizer. Recording them takes 4,000 solves, about 25 minutes
+    on a laptop, so here's a set we prepared earlier.
     """)
     return
 
@@ -430,26 +485,21 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    HERE,
     MESH,
     bracket,
+    fetch,
     fetch_data,
     load_dataset,
     mo,
     np,
     plot_design,
     plot_displacement,
-    urllib,
 ):
     mo.stop(not fetch_data.value)
 
-    DATASET_URL = "https://example.com/d3a/dataset.npz"  # TODO: upload and fill in
     N_TEST_CASES = 10
 
-    _path = HERE / "dataset.npz"
-    if not _path.exists():
-        urllib.request.urlretrieve(DATASET_URL, _path)
-
+    _path = fetch("dataset.npz")
     with np.load(_path) as _npz:
         dataset = {k: _npz[k] for k in ("loads", "rho", "mesh")}
     assert tuple(dataset["mesh"]) == MESH, "dataset was generated on a different mesh"
@@ -539,8 +589,8 @@ def _(
 def _(mo):
     mo.md(r"""
     Getting the error down to about 1% takes 25 minutes of training, so here's one we trained
-    earlier. It has the solver's interface, with the same inputs and outputs, so any code that
-    calls the solver can call the surrogate instead.
+    earlier. It has the same inputs and outputs as the solver, so any code that calls the
+    solver can call the surrogate instead.
     """)
     return
 
@@ -553,16 +603,12 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
-def _(HERE, Tesseract, fetch_weights, mo, np, os, urllib):
+def _(HERE, Tesseract, fetch, fetch_weights, mo, np, os):
     mo.stop(not fetch_weights.value)
-
-    WEIGHTS_URL = "https://example.com/d3a/{}"  # TODO: upload and fill in
 
     def load_surrogate(name):
         """The surrogate Tesseract with the given weights file, plus its training metadata."""
-        path = HERE / "surrogate" / name
-        if not path.exists():
-            urllib.request.urlretrieve(WEIGHTS_URL.format(name), path)
+        path = fetch(f"surrogate/{name}")
         os.environ["SURROGATE_WEIGHTS"] = str(path)
         try:
             tess = Tesseract.from_tesseract_api(HERE / "surrogate" / "tesseract_api.py")
@@ -625,8 +671,8 @@ def _(
             plot_displacement(bracket, _v, check_rho, check_load, title=f"surrogate · {_t_surrogate * 1000:.0f} ms", **_common),
         ], widths="equal"),
         mo.md(
-            f"Displacement error **{100 * np.linalg.norm(_v - _u) / np.linalg.norm(_u):.1f}%**, "
-            f"**{_t_solver / _t_surrogate:.0f}× faster**. A design and load the surrogate never saw in training."
+            f"On a design and load it never saw in training, the surrogate's displacement field is off by "
+            f"**{100 * np.linalg.norm(_v - _u) / np.linalg.norm(_u):.1f}%**, and it runs **{_t_solver / _t_surrogate:.0f}× faster**."
         ),
     ])
     return check_inputs, check_rho
@@ -744,7 +790,7 @@ def _(
         mo.md(
             "| | solver's design | surrogate's design |\n|---|---|---|\n"
             f"| compliance, according to the surrogate | | {_claimed:.3g} |\n"
-            f"| compliance, according to the solver | {c_reference:.3g} | **{_actual:.3g} ({_actual / c_reference:.0f}× worse)** |\n"
+            f"| compliance, according to the solver | {c_reference:.3g} | **{_actual:.3g} ({_actual / c_reference:.1f}× worse)** |\n"
             f"| material connects load to wall | yes | **{'yes' if _connected else 'no'}** |\n\n"
             "Each step takes the optimizer further from the designs the surrogate was trained on. "
             "It follows the surrogate's errors wherever they promise a stiffer bracket."
@@ -763,13 +809,26 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Optimizing through learned surrogates is a known hard problem in topology optimization.
-    A [2022 review from DTU](https://doi.org/10.1007/s00158-022-03347-1) puts it this way:
+    Our surrogate is in good company. In 2022, the DTU group behind much of modern topology
+    optimization reviewed 111 papers that bring neural networks into the field
+    ([Woldseth et al., 2022](https://doi.org/10.1007/s00158-022-03347-1)). Their verdict:
 
     > An overall trend in the literature is the strong faith in the “magic” of artificial intelligence and thus misunderstandings about the capabilities of such methods.
 
-    Here, a single solver call was enough to expose the problem. Would it help to train the
-    surrogate on gradients too? See the bonus section at the end.
+    They found few convincing results. Networks were often tied to one mesh and a narrow set of
+    loads, judged by how closely their pixels matched a reference rather than by how stiff the
+    result was, and presented without counting what their training data cost. The review
+    measures that cost as a breakeven point, the number of problems a method has to solve before its
+    training pays off. Ours took 4,000 solves to train, as many as 160 optimizations run
+    directly with the solver, and the design it produced was worse.
+
+    The authors' central claim is that the iteration was never the problem. The expensive part
+    is the solve inside each iteration. Networks that skip the optimization and draw the final
+    design directly should therefore be dropped altogether, they argue. The most promising
+    approaches they found keep the optimizer, make each solve cheaper, and still call the real
+    solver every so often. Ours kept the optimizer but only consulted the solver once the design was finished.
+
+    Would it help to train the surrogate on gradients too? See the bonus section at the end.
 
     ## What we saw
 
@@ -779,10 +838,98 @@ def _(mo):
     - **Accurate fields don't guarantee accurate gradients**, and an optimizer tends to find and
       exploit the errors that remain. Check gradients, and check the final answer with the solver.
     - **One interface** for solver and surrogate makes all of these checks a one-line change.
+    """)
+    return
 
-    **Take it home:** this notebook, [Mosaic](https://github.com/pasteurlabs/mosaic) for
-    differentiable solvers, and [Tesseract](https://github.com/pasteurlabs/tesseract-core)
-    to put your own solver or surrogate behind the same interface.
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Going further
+
+    **Try it in this notebook**
+
+    - Swing the load past ±45° in the swap above. That's outside the training range, so compare
+      the compliance the surrogate claims with the solver's verdict.
+    - Let the optimizer check its surrogate. Every few iterations, ask the solver for the true
+      gradient and take smaller steps when the two disagree. This is the idea behind
+      [trust-region model management](https://doi.org/10.1007/BF01197433), a classic way to
+      optimize with approximate models. The review above singles out a related idea, retraining
+      the network on fresh solver results during the run, as one of the most promising.
+    - Swap the solver. Mosaic's other structural solvers, built on deal.II, FEniCS, Firedrake,
+      JAX-FEM and TopOpt.jl, share this solver's interface, so the same `optimize` function works
+      with any of them.
+
+    **The tools used here** *(ours)*
+
+    - [Mosaic](https://github.com/pasteurlabs/mosaic) collects differentiable physics solvers
+      and checks their gradients. The [paper](https://arxiv.org/abs/2606.27895) benchmarks 14 of
+      them and finds that memory limits, numerical stability and whether a solver can run the
+      task at all matter more in practice than small differences in gradient accuracy.
+    - [Tesseract Core](https://github.com/pasteurlabs/tesseract-core)
+      ([paper](https://doi.org/10.21105/joss.08385)) puts a solver or surrogate behind one
+      interface, and [Tesseract-JAX](https://github.com/pasteurlabs/tesseract-jax) makes it
+      differentiable from JAX. The
+      [beginner's guide](https://pasteurlabs.ai/insights/beginners-guide-tesseract) walks through
+      wrapping your own code.
+
+    **Foundations**
+
+    - *Topology optimization.* Many people start with
+      [Sigmund's 99-line code](https://doi.org/10.1007/s001580050176) or its
+      [88-line successor](https://doi.org/10.1007/s00158-010-0594-7). The standard reference is
+      the [book by Bendsøe and Sigmund](https://doi.org/10.1007/978-3-662-05086-6), and
+      [Sigmund and Maute (2013)](https://doi.org/10.1007/s00158-013-0978-6) compare the main
+      approaches. The [DTU TopOpt group](https://www.topopt.mek.dtu.dk) has interactive apps to
+      play with.
+    - *Differentiable programming.* [Sapienza et al. (2024)](https://arxiv.org/abs/2406.09699)
+      review how to differentiate through solvers of differential equations.
+      [Physics-based Deep Learning](https://physicsbaseddeeplearning.org) is a free, hands-on
+      book, and our [From JVP to VJP](https://pasteurlabs.ai/insights/jax) series shows how JAX
+      computes gradients.
+    - *Neural operators.* The [FNO](https://arxiv.org/abs/2010.08895) and
+      [DeepONet](https://arxiv.org/abs/1910.03193) papers introduced the two most common
+      architectures, and [Kovachki et al. (2023)](https://arxiv.org/abs/2108.08481) lay out the
+      general framework. [neuraloperator](https://github.com/neuraloperator/neuraloperator) is
+      the reference library. [O'Leary-Roseberry et al. (2024)](https://arxiv.org/abs/2206.10745)
+      train operators on derivatives, as in the bonus section.
+    - *The bigger picture.* [Simulation Intelligence](https://arxiv.org/abs/2112.03235)
+      *(ours)* lays out a research agenda for combining simulation and machine learning.
+
+    **Read critically**
+
+    - [Woldseth et al. (2022)](https://doi.org/10.1007/s00158-022-03347-1), the review quoted
+      above. It closes with six questions about AI in topology optimization that apply well
+      beyond it, starting with "what does the AI system actually achieve?"
+    - [McGreivy and Hakim (2024)](https://arxiv.org/abs/2407.07218) on weak baselines and
+      reporting biases in machine learning for fluid dynamics.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## If you're getting into physics-AI
+
+    The surrogate in this notebook did what many papers ask of a model. It reached about 1%
+    error on held-out cases at a fraction of the solver's cost, and it still lost to a
+    decades-old method on both cost and quality. The number it was trained and tested on
+    wasn't the one that mattered.
+
+    So start from the problem rather than the method. Before you train a surrogate, work out
+    its breakeven point against the best classical approach, including data and training, and
+    decide how you will check its answers where they will actually be used. If it never breaks
+    even or you can't run the check, pick another problem. The ones worth
+    your time are those where classical methods have no good answer. Examples are pipelines
+    with a step that has no gradient
+    ([Rehmann et al., 2025](https://arxiv.org/abs/2511.10761), *ours*), many-query workloads
+    such as uncertainty quantification, where one surrogate serves thousands of evaluations
+    that stay inside its training range, and physics that is known only from measurements.
+
+    Telling these cases apart takes a working knowledge of the classical methods. In our
+    experience, that is the most useful skill to build early, and it's rarer in this field
+    than knowing how to train a network.
     """)
     return
 
