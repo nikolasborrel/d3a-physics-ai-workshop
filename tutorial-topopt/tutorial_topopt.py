@@ -39,6 +39,33 @@ def _():
 
 @app.cell(hide_code=True)
 def _(mo):
+    mo.md(r"""
+    # Designing a bracket with a differentiable solver
+
+    A bracket is bolted to a wall and carries a load. We may fill **30% of the box** with
+    material. Where should it go so the bracket is as stiff as possible?
+
+    /// tip | How to use this notebook
+
+    This is a [marimo](https://marimo.io) notebook. If the cells below show no output yet, run
+    them all with Ctrl+Shift+R (⌘⇧R on a Mac).
+
+    - **It's reactive.** Move a slider and everything that depends on it updates by itself.
+      There's no need to run cells from top to bottom.
+    - **Slow steps wait for a button**, such as **Optimize** or **Fetch the training data**.
+      Press it to run the step, and press it again after changing its settings.
+    - **The code is there if you want it.** Most cells hide their code to keep the story
+      readable. Click a cell and press Ctrl+H (⌘H) to show it. You can edit any cell, and the
+      cells that depend on it rerun.
+    - **Sections 1 to 3 run live.** Section 4 uses a dataset and trained surrogates that we
+      prepared earlier, and downloads them when you ask for them.
+    ///
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
     import tempfile
     import urllib.request
     from pathlib import Path
@@ -77,43 +104,75 @@ def _(mo):
 
     for _name in SUPPORT_FILES:
         fetch(_name)
-    return HERE, fetch
+    return HERE, Path, fetch
 
 
 @app.cell(hide_code=True)
-def _(HERE, mo):
-    mo.vstack([
-        mo.md(r"""
-        # Designing a bracket with a differentiable solver
+def _(Path, mo):
+    def figure(content, caption, width="100%"):
+        """``content`` above a markdown caption. An image path is shown centered at ``width``."""
+        if isinstance(content, Path):
+            content = mo.image(str(content), width=width, style={"margin": "0 auto"})
+        return mo.vstack([
+            content,
+            mo.md(caption).style(color="var(--muted-foreground)", text_align="center", font_size="0.9rem"),
+        ])
 
-        A bracket is bolted to a wall and carries a load. We may fill **30% of the box** with
-        material. Where should it go so the bracket is as stiff as possible?
-        """),
-        mo.image(str(HERE / "assets" / "visual_abstract.png"), width="100%"),
-        mo.md(
-            "*Photo: balcony bracket, William Ravenel House, Charleston. Jack Boucher, "
-            "[Historic American Buildings Survey](https://www.loc.gov/pictures/item/sc0882.photos.364591p) "
-            "(public domain).*"
-        ),
-        mo.md(r"""
-        **What you'll take away**
+    return (figure,)
 
-        1. A differentiable solver tells you how every part of a design affects performance, in a single backward pass.
-        2. With that, a few lines of code make a topology optimizer, the kind of tool commercial CAE packages sell.
-        3. A neural surrogate can imitate the solver at a fraction of the cost, but accurate predictions alone don't make it safe to optimize with.
-        """),
-    ])
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## What this tutorial shows
+
+    We design the bracket with gradients from a differentiable solver. Then we train a neural
+    surrogate to stand in for the solver and see how well it does the same job.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(HERE, figure):
+    figure(
+        HERE / "assets" / "visual_abstract.png",
+        "From a real bracket to an optimized one. The optimizer gets its gradients from a "
+        "differentiable solver or from a neural surrogate, through the same interface. Photo: "
+        "balcony bracket, William Ravenel House, Charleston, by Jack Boucher, "
+        "[Historic American Buildings Survey](https://www.loc.gov/pictures/item/sc0882.photos.364591p) "
+        "(public domain).",
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    **What you'll take away**
+
+    1. A differentiable solver tells you how every part of a design affects performance, in a single backward pass.
+    2. With that, a few lines of code make a topology optimizer, the kind of tool commercial CAE packages sell.
+    3. A neural surrogate can imitate the solver at a fraction of the cost, but accurate predictions alone don't make it safe to optimize with.
+    """)
     return
 
 
 @app.cell(hide_code=True)
 def _(HERE):
     import inspect
+    import logging
     import os
     import sys
     import time
     import warnings
 
+    # Hosted machines may come with JAX's CUDA plugin but no usable GPU. JAX then falls back to
+    # the CPU after logging the failed plugin start as an error, so pick the CPU directly and
+    # drop that message.
+    os.environ.setdefault("JAX_PLATFORMS", "cpu")
+    logging.getLogger("jax._src.xla_bridge").addFilter(
+        lambda record: not record.getMessage().startswith("Jax plugin configuration error")
+    )
     os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")  # silence a log line from a torch-fem dependency
     # tesseract-jax <= 0.4.1 casts NaN into integer arrays on the backward pass (fixed in tesseract-jax#259).
     warnings.filterwarnings("ignore", message="invalid value encountered in cast", category=RuntimeWarning)
@@ -168,18 +227,26 @@ def _(HERE):
 
 
 @app.cell(hide_code=True)
-def _(HERE, mo):
-    mo.vstack([
-        mo.md(r"""
-        ## 1. A solver from Mosaic
+def _(mo):
+    mo.md(r"""
+    ## 1. A solver from Mosaic
 
-        [Mosaic](https://github.com/pasteurlabs/mosaic) collects differentiable physics solvers
-        behind one interface, a [Tesseract](https://github.com/pasteurlabs/tesseract-core), and
-        checks both their results and their gradients on shared tasks. We take its 3D elasticity
-        solver and load it straight into this notebook.
-        """),
-        mo.image(str(HERE / "assets" / "mosaic_overview.png"), width="100%"),
-    ])
+    [Mosaic](https://github.com/pasteurlabs/mosaic) collects differentiable physics solvers
+    behind one interface, a [Tesseract](https://github.com/pasteurlabs/tesseract-core), and
+    checks both their results and their gradients on shared tasks. We take its 3D elasticity
+    solver and load it straight into this notebook.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(HERE, figure):
+    figure(
+        HERE / "assets" / "mosaic_overview.png",
+        "Mosaic wraps solvers built on many different frameworks behind the same interface, "
+        "so they can be compared on shared tasks across physical domains.",
+        width="70%",
+    )
     return
 
 
@@ -235,8 +302,8 @@ def _(
     VOLFRAC,
     angle,
     bracket,
+    figure,
     height,
-    mo,
     n_cells,
     np,
     plot_displacement,
@@ -253,14 +320,12 @@ def _(
     t_solve = time.perf_counter() - _t0
     c_uniform = float(_out["compliance"])
 
-    mo.vstack([
-        plot_displacement(bracket, _out["displacement"], load=load, opacity=0.35,
-                          title="Starting point: 30% material, spread evenly over the box"),
-        mo.md(
-            f"Compliance **{c_uniform:.3g}**. One solve took **{t_solve:.2f} s**. "
-            "Colors show how far each point moves, and the deformation is exaggerated."
-        ),
-    ])
+    figure(
+        plot_displacement(bracket, _out["displacement"], load=load, opacity=0.35),
+        "The starting point, with 30% material spread evenly over the box. Colors show how far "
+        "each point moves, and the deformation is exaggerated. "
+        f"Compliance **{c_uniform:.3g}**, and one solve took **{t_solve:.2f} s**.",
+    )
     return c_uniform, inputs, load, rho_uniform, t_solve
 
 
@@ -289,21 +354,29 @@ def _(apply_tesseract, inputs, jax, jnp, rho_uniform, solver, time):
 
 
 @app.cell(hide_code=True)
-def _(bracket, dc, load, mo, n_cells, np, plot_cell_field, t_grad, t_solve):
-    mo.vstack([
+def _(
+    bracket,
+    dc,
+    figure,
+    load,
+    n_cells,
+    np,
+    plot_cell_field,
+    t_grad,
+    t_solve,
+):
+    figure(
         plot_cell_field(
             bracket,
             -np.asarray(dc),
             load,
-            title="Where adding material stiffens the bracket most",
             colorbar_title="stiffness gain,<br>% of largest",
             log_relative=True,
         ),
-        mo.md(
-            f"**{t_grad:.1f} s** for all {n_cells:,} cells. Finite differences would take "
-            f"about **{(n_cells + 1) * t_solve / 60:.0f} minutes**."
-        ),
-    ])
+        f"Where adding material stiffens the bracket most. The backward pass took "
+        f"**{t_grad:.1f} s** for all {n_cells:,} cells, where finite differences would take "
+        f"about **{(n_cells + 1) * t_solve / 60:.0f} minutes**.",
+    )
     return
 
 
@@ -331,23 +404,21 @@ def _(dc, inputs, mo, np, rho_uniform, solver):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.vstack([
-        mo.md(r"""
-        ## 3. Optimize
+    mo.md(r"""
+    ## 3. Optimize
 
-        Each iteration solves, computes the stiffness gain, and moves material toward the cells
-        that gain most while keeping the total at 30%. The `optimize` function below is the
-        entire optimizer.
-        """),
-        mo.accordion({
-            "Two tricks that make it work": mo.md(r"""
-            - **Penalize half-full cells.** A cell's stiffness grows like ρ³, so half-density
-              material is inefficient and cells end up close to empty or full. This is called SIMP.
-            - **Smooth the design.** The solver sees a blurred version of the design. Without the
-              blurring, the optimizer exploits the coarse mesh with checkerboard patterns.
-            """)
-        }),
-    ])
+    Each iteration solves, computes the stiffness gain, and moves material toward the cells
+    that gain most while keeping the total at 30%. The `optimize` function below is the
+    entire optimizer.
+
+    /// details | Two tricks that make it work
+
+    - **Penalize half-full cells.** A cell's stiffness grows like ρ³, so half-density
+      material is inefficient and cells end up close to empty or full. This is called SIMP.
+    - **Smooth the design.** The solver sees a blurred version of the design. Without the
+      blurring, the optimizer exploits the coarse mesh with checkerboard patterns.
+    ///
+    """)
     return
 
 
@@ -419,46 +490,55 @@ def _(
 
 
 @app.cell(hide_code=True)
-def _(HERE, mo):
-    mo.vstack([
-        mo.md(r"""
-        ## 4. A neural surrogate
+def _(mo):
+    mo.md(r"""
+    ## 4. A neural surrogate
 
-        Every iteration costs a solve. That's under a second here, but can be hours on a
-        production mesh. A **surrogate** predicts what the solver computes, the whole
-        displacement field, from the same inputs. Ours is a Fourier neural operator (FNO). It
-        works on the grid of mesh nodes, and every stage of the network is a field on that grid:
-        """),
-        mo.image(str(HERE / "assets" / "fno_architecture.png"), width="100%"),
-        mo.md(
-            "*Each panel is a slice through the middle of the bracket, taken from the trained "
-            "surrogate we load below, on a design and load it never saw in training. The hidden "
-            "fields start out shaped like the design and end up shaped like the displacement.*"
-        ),
-        mo.accordion({
-            "Doesn't the FFT assume a periodic domain?": mo.md(r"""
-            It does, but the FNO doesn't inherit that restriction.
+    Every iteration costs a solve. That's under a second here, but can be hours on a
+    production mesh. A **surrogate** predicts what the solver computes, the whole
+    displacement field, from the same inputs. Ours is a Fourier neural operator (FNO). It
+    works on the grid of mesh nodes, and every stage of the network is a field on that grid.
+    """)
+    return
 
-            - **Padding.** The hidden fields live on a grid of 32 × 8 × 16 points instead of
-              25 × 7 × 13. Whatever wraps around from one end of the bracket lands in the padding
-              first, and the network is free to fill that strip with whatever helps. You can see
-              it doing so outside the dashed boxes.
-            - **A local path.** Every layer adds a pointwise linear term that knows nothing about
-              periodicity. The [original FNO paper](https://arxiv.org/abs/2010.08895) credits this
-              term with handling non-periodic boundaries.
-            - **Boundary conditions as inputs.** Nothing forces the wall to stay fixed. The network
-              sees a channel that marks the clamped nodes and learns from the data that they don't
-              move. It learns this only approximately: on held-out cases, the clamped nodes move by
-              about 0.4% of the largest displacement, where the solver gives exactly zero.
 
-            The problem also suits an FNO. The bracket is a box on a regular grid, which the FFT
-            needs, and displacement fields are smooth, so a few Fourier modes describe them well.
-            Irregular geometry needs extra machinery, such as
-            [learned deformations onto a regular grid](https://arxiv.org/abs/2207.05209), or a
-            different architecture.
-            """)
-        }),
-    ])
+@app.cell(hide_code=True)
+def _(HERE, figure):
+    figure(
+        HERE / "assets" / "fno_architecture.png",
+        "Each panel is a slice through the middle of the bracket, taken from the trained "
+        "surrogate we load below, on a design and load it never saw in training. The hidden "
+        "fields start out shaped like the design and end up shaped like the displacement.",
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    /// details | Doesn't the FFT assume a periodic domain?
+
+    It does, but the FNO doesn't inherit that restriction.
+
+    - **Padding.** The hidden fields live on a grid of 32 × 8 × 16 points instead of
+      25 × 7 × 13. Whatever wraps around from one end of the bracket lands in the padding
+      first, and the network is free to fill that strip with whatever helps. You can see
+      it doing so outside the dashed boxes.
+    - **A local path.** Every layer adds a pointwise linear term that knows nothing about
+      periodicity. The [original FNO paper](https://arxiv.org/abs/2010.08895) credits this
+      term with handling non-periodic boundaries.
+    - **Boundary conditions as inputs.** Nothing forces the wall to stay fixed. The network
+      sees a channel that marks the clamped nodes and learns from the data that they don't
+      move. It learns this only approximately: on held-out cases, the clamped nodes move by
+      about 0.4% of the largest displacement, where the solver gives exactly zero.
+
+    The problem also suits an FNO. The bracket is a box on a regular grid, which the FFT
+    needs, and displacement fields are smooth, so a few Fourier modes describe them well.
+    Irregular geometry needs extra machinery, such as
+    [learned deformations onto a regular grid](https://arxiv.org/abs/2207.05209), or a
+    different architecture.
+    ///
+    """)
     return
 
 
@@ -539,9 +619,20 @@ def _(inspect, mo, neural_operator):
 
 @app.cell(hide_code=True)
 def _(mo):
+    mo.md(r"""
+    ### Train it yourself (optional)
+
+    Nothing below depends on this step, so skip it if you're short on time. A minute of
+    training shows the error coming down, but getting it to about 1% takes 25 minutes.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
     train_seconds = mo.ui.slider(15, 120, step=15, value=45, label="training time (s)", show_value=True)
     run_training = mo.ui.run_button(label="Train")
-    mo.hstack([mo.md("### Train it"), train_seconds, run_training], justify="start", gap=2, align="center")
+    mo.hstack([train_seconds, run_training], justify="start", gap=2)
     return run_training, train_seconds
 
 
@@ -560,7 +651,7 @@ def _(
     train_seconds,
     train_set,
 ):
-    mo.stop(not run_training.value, mo.md("Press **Train** to start."))
+    mo.stop(not run_training.value)
 
     node_grid = (bracket.nx + 1, bracket.ny + 1, bracket.nz + 1)
     u_scale = displacement_scale(train_set[1], train_set[2])
@@ -588,9 +679,10 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Getting the error down to about 1% takes 25 minutes of training, so here's one we trained
-    earlier. It has the same inputs and outputs as the solver, so any code that calls the
-    solver can call the surrogate instead.
+    ### One we trained earlier
+
+    It has the same inputs and outputs as the solver, so any code that calls the solver can
+    call the surrogate instead.
     """)
     return
 
@@ -627,10 +719,21 @@ def _(HERE, Tesseract, fetch, fetch_weights, mo, np, os):
 
 
 @app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Solver or surrogate?
+
+    Pick one of the held-out load cases and a step of its optimization, then compare what the
+    two predict.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
 def _(mo, test_cases):
     test_case = mo.ui.slider(0, len(test_cases) - 1, value=0, label="held-out load case", show_value=True)
     test_iteration = mo.ui.slider(1, 25, value=15, label="optimization step", show_value=True)
-    mo.hstack([mo.md("### Solver or surrogate?"), test_case, test_iteration], justify="start", gap=2, align="center")
+    mo.hstack([test_case, test_iteration], justify="start", gap=2)
     return test_case, test_iteration
 
 
@@ -638,6 +741,7 @@ def _(mo, test_cases):
 def _(
     bracket,
     dataset,
+    figure,
     mo,
     np,
     plot_displacement,
@@ -665,16 +769,14 @@ def _(
     _magnitude = np.linalg.norm(_u, axis=1).max()
     _common = dict(scale=0.3 / _magnitude, cmax=float(_magnitude), height=360, threshold=0.4)
 
-    mo.vstack([
+    figure(
         mo.hstack([
             plot_displacement(bracket, _u, check_rho, check_load, title=f"solver · {_t_solver * 1000:.0f} ms", **_common),
             plot_displacement(bracket, _v, check_rho, check_load, title=f"surrogate · {_t_surrogate * 1000:.0f} ms", **_common),
         ], widths="equal"),
-        mo.md(
-            f"On a design and load it never saw in training, the surrogate's displacement field is off by "
-            f"**{100 * np.linalg.norm(_v - _u) / np.linalg.norm(_u):.1f}%**, and it runs **{_t_solver / _t_surrogate:.0f}× faster**."
-        ),
-    ])
+        f"On a design and load it never saw in training, the surrogate's displacement field is off by "
+        f"**{100 * np.linalg.norm(_v - _u) / np.linalg.norm(_u):.1f}%**, and it runs **{_t_solver / _t_surrogate:.0f}× faster**.",
+    )
     return check_inputs, check_rho
 
 
@@ -723,18 +825,21 @@ def _(
 
 @app.cell(hide_code=True)
 def _(mo):
+    mo.md(r"""
+    ### Swap it into the optimizer
+
+    Same `optimize` function as in section 3, with the surrogate passed in place of the solver.
+    Then we ask the solver how good the result really is.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
     swap_height = mo.ui.slider(0.1, 0.9, step=0.05, value=0.35, label="load height", show_value=True)
     swap_angle = mo.ui.slider(-90, 90, step=5, value=20, label="load angle (°)", show_value=True)
     run_swap = mo.ui.run_button(label="Optimize with surrogate and solver (≈30 s)")
-    mo.vstack([
-        mo.md(r"""
-        ### Swap it into the optimizer
-
-        Same `optimize` function as in section 3, with the surrogate passed in place of the solver.
-        Then we ask the solver how good the result really is.
-        """),
-        mo.hstack([swap_height, swap_angle, run_swap], justify="start", gap=2),
-    ])
+    mo.hstack([swap_height, swap_angle, run_swap], justify="start", gap=2)
     return run_swap, swap_angle, swap_height
 
 
@@ -829,7 +934,40 @@ def _(mo):
     solver every so often. Ours kept the optimizer but only consulted the solver once the design was finished.
 
     Would it help to train the surrogate on gradients too? See the bonus section at the end.
+    """)
+    return
 
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## If you're getting into physics-AI
+
+    The surrogate in this notebook did what many papers ask of a model. It reached about 1%
+    error on held-out cases at a fraction of the solver's cost, and it still lost to a
+    decades-old method on both cost and quality. The number it was trained and tested on
+    wasn't the one that mattered.
+
+    So start from the problem rather than the method. Before you train a surrogate, work out
+    its breakeven point against the best classical approach, including data and training, and
+    decide how you will check its answers where they will actually be used. If it never breaks
+    even or you can't run the check, pick another problem. The ones worth
+    your time are those where classical methods have no good answer. Examples are pipelines
+    with a step that has no gradient
+    ([Rehmann et al., 2025](https://arxiv.org/abs/2511.10761), *ours*), many-query workloads
+    such as uncertainty quantification, where one surrogate serves thousands of evaluations
+    that stay inside its training range, and physics that is known only from measurements.
+
+    Telling these cases apart takes a working knowledge of the classical methods. In our
+    experience, that is the most useful skill to build early, and it's rarer in this field
+    than knowing how to train a network.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
     ## What we saw
 
     - **A differentiable solver** gives the stiffness gain of every cell in one backward pass.
@@ -903,33 +1041,6 @@ def _(mo):
       beyond it, starting with "what does the AI system actually achieve?"
     - [McGreivy and Hakim (2024)](https://arxiv.org/abs/2407.07218) on weak baselines and
       reporting biases in machine learning for fluid dynamics.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(r"""
-    ## If you're getting into physics-AI
-
-    The surrogate in this notebook did what many papers ask of a model. It reached about 1%
-    error on held-out cases at a fraction of the solver's cost, and it still lost to a
-    decades-old method on both cost and quality. The number it was trained and tested on
-    wasn't the one that mattered.
-
-    So start from the problem rather than the method. Before you train a surrogate, work out
-    its breakeven point against the best classical approach, including data and training, and
-    decide how you will check its answers where they will actually be used. If it never breaks
-    even or you can't run the check, pick another problem. The ones worth
-    your time are those where classical methods have no good answer. Examples are pipelines
-    with a step that has no gradient
-    ([Rehmann et al., 2025](https://arxiv.org/abs/2511.10761), *ours*), many-query workloads
-    such as uncertainty quantification, where one surrogate serves thousands of evaluations
-    that stay inside its training range, and physics that is known only from measurements.
-
-    Telling these cases apart takes a working knowledge of the classical methods. In our
-    experience, that is the most useful skill to build early, and it's rarer in this field
-    than knowing how to train a network.
     """)
     return
 
@@ -1023,11 +1134,6 @@ def _(mo):
     from the designs the surrogate was trained on, where even a derivative-informed surrogate
     has no reliable answers.
     """)
-    return
-
-
-@app.cell
-def _():
     return
 
 

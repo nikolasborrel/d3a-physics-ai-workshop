@@ -5,16 +5,16 @@ Live tutorial for the D3A 4.0 session "Physics-Informed AI for Real-World Engine
 ## Run it
 
 ```bash
-uvx marimo edit --sandbox tutorial.py
+uvx marimo edit --sandbox tutorial_topopt.py
 ```
 
-`--sandbox` installs the dependencies declared at the top of `tutorial.py` into an isolated environment. The first launch downloads torch and VTK, so allow a few minutes.
+`--sandbox` installs the dependencies declared at the top of `tutorial_topopt.py` into an isolated environment. The first launch downloads torch and VTK, so allow a few minutes.
 
 ## Files
 
 | File | What it is |
 | --- | --- |
-| `tutorial.py` | The marimo notebook. |
+| `tutorial_topopt.py` | The marimo notebook. |
 | `bracket.py` | Plumbing kept out of the notebook: load cases, density filter, optimality-criteria update, 3D plots. |
 | `neural_operator.py` | The FNO surrogate: input features on the node grid, the network, the training step. |
 | `solver/tesseract_api.py` | Mosaic's torch-fem structural solver. |
@@ -43,4 +43,4 @@ The notebook shows each step running live, then swaps in results prepared in adv
 
 Run the scripts with `uv run --with-requirements requirements.txt python <script>`. `weights_fields.npz` is trained on displacement fields only, and `weights.npz` is fine-tuned from it to also match the solver's gradients.
 
-If a file is missing, the notebook downloads it from this repository on GitHub. The same goes for the helper modules and images when `tutorial.py` runs on its own, as on molab, which only gets the notebook file. The list of those files is `SUPPORT_FILES` in `tutorial.py`; anything new the notebook needs at startup has to be added there and pushed to `main`.
+If a file is missing, the notebook downloads it from this repository on GitHub. The same goes for the helper modules and images when `tutorial_topopt.py` runs on its own, as on molab, which only gets the notebook file. The list of those files is `SUPPORT_FILES` in `tutorial_topopt.py`; anything new the notebook needs at startup has to be added there and pushed to `main`.
