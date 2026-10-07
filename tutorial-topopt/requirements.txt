@@ -1,0 +1,10 @@
+marimo>=0.25
+tesseract-core[runtime]>=1.0
+tesseract-jax
+jax
+optax
+numpy
+scipy
+plotly
+torch
+torch-fem==0.12.1
