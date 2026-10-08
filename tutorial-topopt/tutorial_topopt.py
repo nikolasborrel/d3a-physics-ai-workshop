@@ -46,7 +46,7 @@ def _(mo):
     ![QR code](public/qr.png)
 
     /// caption
-    **Follow along live on Molab**: https://molab.marimo.io/notebooks/nb_JcnbQPwNXUbK6mA5eCWUmY
+    **Follow along**: [github.com/nikolasborrel/d3a-physics-ai-workshop](https://github.com/nikolasborrel/d3a-physics-ai-workshop)
     ///
 
     /// note | The problem
