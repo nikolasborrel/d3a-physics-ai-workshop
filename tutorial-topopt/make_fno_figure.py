@@ -121,7 +121,6 @@ def main() -> None:
     hidden, inside = activations(params, x)
     u_surrogate = np.asarray(no.to_grid(no.predict_displacement(params, u_scale, rho, forces, shape), shape))
     u_solver = np.asarray(no.to_grid(u_solver, shape))
-    error = np.linalg.norm(u_surrogate - u_solver) / np.linalg.norm(u_solver)
 
     fig = plt.figure(figsize=FIGSIZE, dpi=200)
 
@@ -157,17 +156,19 @@ def main() -> None:
     for left in lefts[:-1]:
         arrow(fig, (left + w + deck_right + 0.006, y1), (left + pitch - 0.006, y1))
 
+    # Vertical displacement is dominated by the bracket bending as a whole, a ramp from wall to tip.
+    # Subtracting the solver's average at each x leaves the part that depends on the design.
     out_left = lefts[-1] + pitch + 0.005
-    vmax = np.abs(u_solver[..., 2]).max()
+    bending = u_solver[..., 2].mean(axis=(1, 2), keepdims=True)
+    vmax = np.abs(side_view(u_solver[..., 2] - bending)).max()
     for j, (field, label) in enumerate([(u_surrogate, "surrogate"), (u_solver, "solver")]):
-        image = side_view(field[..., 2])
+        image = side_view(field[..., 2] - bending)
         h = 0.08 * image.shape[0] / image.shape[1] * ASPECT
         ax = image_axes(fig, out_left, y1 + 0.02 if j == 0 else y1 - 0.02 - h, 0.08, image)
-        show(ax, image, "viridis", vmin=-vmax, vmax=0)
+        show(ax, image, LATENT_CMAP, vmin=-vmax, vmax=vmax)
         ax.set_title(f"{label}", fontsize=8, color=INK, pad=2)
     arrow(fig, (lefts[-1] + w + deck_right + 0.006, y1), (out_left - 0.006, y1), "project", "pointwise,\n24 → 3")
-    note(fig, out_left, y1 - 0.14,
-         f"vertical displacement, cropped\nto 25 × 13. {100 * error:.1f}% error on this\nheld-out case.")
+    note(fig, out_left, y1 - 0.14, "vertical displacement minus\nits average at each x,\ncropped to 25 × 13")
 
     # ── Row 2: inside one Fourier layer ──────────────────────────────────────
     heading(fig, 0.45, "Inside a Fourier layer: a global path through the lowest Fourier modes, plus a local path")
@@ -216,7 +217,7 @@ def main() -> None:
 
     out_path = HERE / "assets" / "fno_architecture.png"
     fig.savefig(out_path, bbox_inches="tight", facecolor="white")
-    print(f"wrote {out_path}, sample error {100 * error:.1f}%")
+    print(f"wrote {out_path}")
 
 
 if __name__ == "__main__":
