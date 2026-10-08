@@ -27,7 +27,7 @@
 import marimo
 
 __generated_with = "0.25.1"
-app = marimo.App(width="medium")
+app = marimo.App(width="medium", app_title="D3A physics AI tutorial")
 
 
 @app.cell(hide_code=True)
@@ -42,6 +42,12 @@ def _(mo):
     mo.md(r"""
     # Designing a bracket with a differentiable solver and neural surrogates
     **D3A 4.0 – Physics-informed AI for real-world engineering**
+
+    ![QR code](public/qr.png)
+
+    /// caption
+    **Follow along**: [github.com/nikolasborrel/d3a-physics-ai-workshop](https://github.com/nikolasborrel/d3a-physics-ai-workshop)
+    ///
 
     /// note | The problem
 
