@@ -40,10 +40,15 @@ def _():
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Designing a bracket with a differentiable solver
+    # Designing a bracket with a differentiable solver and neural surrogates
+    **D3A 4.0 – Physics-informed AI for real-world engineering**
+
+    /// note | The problem
 
     A bracket is bolted to a wall and carries a load. We may fill **30% of the box** with
-    material. Where should it go so the bracket is as stiff as possible?
+    material. **Where should it go so the bracket is as stiff as possible?**
+
+    ///
 
     /// tip | How to use this notebook
 
@@ -126,8 +131,8 @@ def _(mo):
     mo.md(r"""
     ## What this tutorial shows
 
-    We design the bracket with gradients from a differentiable solver. Then we train a neural
-    surrogate to stand in for the solver and see how well it does the same job.
+    We design the bracket by optimizing its material distribution with gradients from a differentiable finite element solver. Then we train a neural
+    surrogate to stand in for the solver and see how well it approximates the solver (*pretty well*) and how well it can be optimized over (*pretty horribly*).
     """)
     return
 
@@ -152,7 +157,8 @@ def _(mo):
 
     1. A differentiable solver tells you how every part of a design affects performance, in a single backward pass.
     2. With that, a few lines of code make a topology optimizer, the kind of tool commercial CAE packages sell.
-    3. A neural surrogate can imitate the solver at a fraction of the cost, but accurate predictions alone don't make it safe to optimize with.
+    3. A neural surrogate trained on data created from the solver can imitate it at a fraction of a cost and provide accurate predictions.
+    4. Accurate predictions alone don't make it safe to optimize with, nor meaningful as a replacement for a traditional solver.
     """)
     return
 
@@ -229,12 +235,13 @@ def _(HERE):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 1. A solver from Mosaic
+    ## 1. Getting a differentiable solver from [Mosaic](https://github.com/pasteurlabs/mosaic)
 
-    [Mosaic](https://github.com/pasteurlabs/mosaic) collects differentiable physics solvers
-    behind one interface, a [Tesseract](https://github.com/pasteurlabs/tesseract-core), and
-    checks both their results and their gradients on shared tasks. We take its 3D elasticity
-    solver and load it straight into this notebook.
+    A differentiable solver is any simulator that exposes gradients, which may be computed through different methods internally (such as reverse-mode autodiff via JAX/torch/Julia, adjoint methods, or dual numbers), and may often be large code artifacts with many dependencies. Mosaic collects differentiable physics solvers
+    behind a standardized differentiable interface (a [Tesseract](https://github.com/pasteurlabs/tesseract-core)), and
+    checks both their results and their gradients on shared tasks.
+
+    We take [one of Mosaic's 3D elasticity solvers](https://github.com/pasteurlabs/mosaic/tree/6ad868a663eb819c96c05df8a53bac8165b6a7f2/mosaic/tesseracts/structural-mesh/torch-fem-structural) based on [torch-fem](https://github.com/meyer-nils/torch-fem) and load it straight into this notebook.
     """)
     return
 
@@ -283,7 +290,9 @@ def _(mo):
     The box is split into 1,728 cells, each with a density between 0 (empty) and 1 (solid).
     The solver computes how far every point moves under the load, the displacement field $u$.
     The work done by the load, called **compliance** $C = F \cdot u$, measures how soft the
-    bracket is, so lower means stiffer.
+    bracket is, so **lower means stiffer**.
+
+    ### The solver maps loading to displacement and compliance
     """)
     return
 
@@ -324,7 +333,7 @@ def _(
         plot_displacement(bracket, _out["displacement"], load=load, opacity=0.35),
         "The starting point, with 30% material spread evenly over the box. Colors show how far "
         "each point moves, and the deformation is exaggerated. "
-        f"Compliance **{c_uniform:.3g}**, and one solve took **{t_solve:.2f} s**.",
+        f"Compliance **{c_uniform:.3g}**, solve took **{t_solve:.2f}s**.",
     )
     return c_uniform, inputs, load, rho_uniform, t_solve
 
@@ -332,7 +341,7 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ## 2. One gradient, every cell
+    ## 2. One gradient on every cell
 
     How much stiffer would the bracket get if we added material to cell $i$? That's its
     **stiffness gain** $-\partial C / \partial \rho_i$. Finite differences need one solve per cell, while a
@@ -411,12 +420,12 @@ def _(mo):
     that gain most while keeping the total at 30%. The `optimize` function below is the
     entire optimizer.
 
-    /// details | Two tricks that make it work
+    /// details | Two tricks to make it work
 
     - **Penalize half-full cells.** A cell's stiffness grows like ρ³, so half-density
-      material is inefficient and cells end up close to empty or full. This is called SIMP.
+      material is inefficient and cells end up close to empty or full. This is called SIMP. (Done within the Mosaic setup.)
     - **Smooth the design.** The solver sees a blurred version of the design. Without the
-      blurring, the optimizer exploits the coarse mesh with checkerboard patterns.
+      blurring, the optimizer exploits the coarse mesh with checkerboard patterns. (Done within our geometry definition.)
     ///
     """)
     return
@@ -494,10 +503,11 @@ def _(mo):
     mo.md(r"""
     ## 4. A neural surrogate
 
-    Every iteration costs a solve. That's under a second here, but can be hours on a
-    production mesh. A **surrogate** predicts what the solver computes, the whole
-    displacement field, from the same inputs. Ours is a Fourier neural operator (FNO). It
-    works on the grid of mesh nodes, and every stage of the network is a field on that grid.
+    Every iteration costs a solve (forward + VJP). That's under 1 second here, but can be hours on a
+    more complex case. A **neural surrogate** predicts exactly what the solver computes, the whole
+    displacement field, from the same inputs.
+
+    Here we use a Fourier neural operator (FNO). It works on the grid of mesh nodes, and every stage of the network is a field on that grid.
     """)
     return
 
@@ -679,7 +689,7 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    ### One we trained earlier
+    ### Download one we trained earlier
 
     It has the same inputs and outputs as the solver, so any code that calls the solver can
     call the surrogate instead.
@@ -689,7 +699,7 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(mo):
-    fetch_weights = mo.ui.run_button(label="Fetch the trained surrogates")
+    fetch_weights = mo.ui.run_button(label="Fetch the trained surrogate")
     fetch_weights
     return (fetch_weights,)
 
@@ -785,8 +795,13 @@ def _(mo):
     mo.md(r"""
     ### Check the gradient, too
 
-    The optimizer never looks at the displacement field. It only uses the stiffness gain of
-    each cell, so that's what has to be right. Each dot below is one cell.
+    The 1% accuracy figure is confounded, in favor of the surrogate. Most of the displacement comes from the bracket bending as a
+    whole, which is easy to predict and dominates the error. The part that depends on the
+    details of the design is only about 2% of the total field, and there the surrogate is off by
+    roughly 30%.
+
+    And the optimizer doesn't use the displacement field at all! It only uses the stiffness gain
+    of each cell, so that's what has to be right. Let's check it, each dot below is one cell.
     """)
     return
 
@@ -914,7 +929,9 @@ def _(
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    Our surrogate is in good company. In 2022, the DTU group behind much of modern topology
+    In most runs, the above looks terrible. **This surrogate isn't fit for optimization at all!**
+
+    But our surrogate is in good company. In 2022, the DTU group behind much of modern topology
     optimization reviewed 111 papers that bring neural networks into the field
     ([Woldseth et al., 2022](https://doi.org/10.1007/s00158-022-03347-1)). Their verdict:
 
@@ -924,16 +941,12 @@ def _(mo):
     loads, judged by how closely their pixels matched a reference rather than by how stiff the
     result was, and presented without counting what their training data cost. The review
     measures that cost as a breakeven point, the number of problems a method has to solve before its
-    training pays off. Ours took 4,000 solves to train, as many as 160 optimizations run
-    directly with the solver, and the design it produced was worse.
+    training pays off. **Our surrogate took 4,000 solves to train, as many as 160 optimizations run
+    directly with the solver, and the design it produced was worse.**
 
-    The authors' central claim is that the iteration was never the problem. The expensive part
-    is the solve inside each iteration. Networks that skip the optimization and draw the final
-    design directly should therefore be dropped altogether, they argue. The most promising
-    approaches they found keep the optimizer, make each solve cheaper, and still call the real
-    solver every so often. Ours kept the optimizer but only consulted the solver once the design was finished.
-
+    /// Tip | A better surrogate?
     Would it help to train the surrogate on gradients too? See the bonus section at the end.
+    ///
     """)
     return
 
@@ -944,23 +957,33 @@ def _(mo):
     ## If you're getting into physics-AI
 
     The surrogate in this notebook did what many papers ask of a model. It reached about 1%
-    error on held-out cases at a fraction of the solver's cost, and it still lost to a
-    decades-old method on both cost and quality. The number it was trained and tested on
-    wasn't the one that mattered.
+    error on held-out cases at a fraction of the solver's cost, yet it still lost to a
+    decades-old method on both cost and quality. The number it was evaluated on
+    wasn't the one that matters.
 
-    So start from the problem rather than the method. Before you train a surrogate, work out
-    its breakeven point against the best classical approach, including data and training, and
-    decide how you will check its answers where they will actually be used. If it never breaks
-    even or you can't run the check, pick another problem. The ones worth
-    your time are those where classical methods have no good answer. Examples are pipelines
+    Therefore, our advice to people going into this field:
+
+    1. **Start from the problem rather than the method.** Before you train a surrogate, work out
+    its breakeven point against the best classical approach, including data and training. If it
+    never breaks even, pick another problem.
+    2. **Especially compelling are problems where classical methods have no good answer.** Examples are pipelines
     with a step that has no gradient
     ([Rehmann et al., 2025](https://arxiv.org/abs/2511.10761), *ours*), many-query workloads
     such as uncertainty quantification, where one surrogate serves thousands of evaluations
     that stay inside its training range, and physics that is known only from measurements.
+    3. **Keep the solver in the loop.** A surrogate is easiest to trust when the solver still
+    checks it: as a cheap first guess the solver refines, inside a trust region that falls back
+    to the solver when the two disagree, or retrained on fresh solver results as the run moves
+    into new territory. A surrogate that replaces the solver outright has to be right everywhere
+    the optimizer might go, and this notebook shows how hard that is.
+    4. **Judge the surrogate by what it is used for, against a meaningful baseline.** Measure
+    what your users care about (here, how stiff the final design is rather than the error in the
+    displacement field), compare with the strongest classical method you can find, and report
+    the cases where the surrogate loses. Weak baselines are common in the field
+    ([McGreivy and Hakim, 2024](https://arxiv.org/abs/2407.07218)).
 
-    Telling these cases apart takes a working knowledge of the classical methods. In our
-    experience, that is the most useful skill to build early, and it's rarer in this field
-    than knowing how to train a network.
+    All of this takes a working knowledge of the classical methods. In our experience, that is
+    the most useful skill to build early.
     """)
     return
 
@@ -1026,11 +1049,17 @@ def _(mo):
       book, and our [From JVP to VJP](https://pasteurlabs.ai/insights/jax) series shows how JAX
       computes gradients.
     - *Neural operators.* The [FNO](https://arxiv.org/abs/2010.08895) and
-      [DeepONet](https://arxiv.org/abs/1910.03193) papers introduced the two most common
+      [DeepONet](https://arxiv.org/abs/1910.03193) papers introduced the two classic
       architectures, and [Kovachki et al. (2023)](https://arxiv.org/abs/2108.08481) lay out the
-      general framework. [neuraloperator](https://github.com/neuraloperator/neuraloperator) is
-      the reference library. [O'Leary-Roseberry et al. (2024)](https://arxiv.org/abs/2206.10745)
-      train operators on derivatives, as in the bonus section.
+      general framework. They are a good way to learn the ideas, but rarely what runs at
+      industrial scale. Surrogates for engineering simulations on large, unstructured meshes use
+      architectures such as [MeshGraphNet](https://arxiv.org/abs/2010.03409),
+      [Transolver](https://arxiv.org/abs/2402.02366),
+      [GeoTransolver](https://arxiv.org/abs/2512.20399) and
+      [DoMINO](https://arxiv.org/abs/2501.13350).
+    - *Software implementations.* [neuraloperator](https://github.com/neuraloperator/neuraloperator) is the reference library
+      for the classic architectures, and [NVIDIA PhysicsNeMo](https://github.com/NVIDIA/physicsnemo)
+      is a broader framework for training physics surrogates that implements all of the above.
     - *The bigger picture.* [Simulation Intelligence](https://arxiv.org/abs/2112.03235)
       *(ours)* lays out a research agenda for combining simulation and machine learning.
 
@@ -1048,6 +1077,7 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
+    ---
     ## Bonus: What happens if we also train on gradients?
 
     Our solver is differentiable, so every training sample already comes with the solver's

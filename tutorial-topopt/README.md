@@ -4,6 +4,12 @@ Live tutorial for the D3A 4.0 session "Physics-Informed AI for Real-World Engine
 
 ## Run it
 
+### Option A - run via Molab
+
+Execute this demo in your browser without installing anything locally (requires registration). [Click here](https://molab.marimo.io/notebooks/nb_JcnbQPwNXUbK6mA5eCWUmY)
+
+### Option B - run on your machine
+
 ```bash
 uvx marimo edit --sandbox tutorial_topopt.py
 ```
